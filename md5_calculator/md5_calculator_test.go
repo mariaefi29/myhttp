@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,7 +16,7 @@ import (
 func TestCalculator_CalcMD5Hash(t *testing.T) {
 	respStr := "Hello, this is a test server!"
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, respStr)
+		_, _ = w.Write([]byte(respStr))
 	}))
 	defer testServer.Close()
 
@@ -27,9 +26,16 @@ func TestCalculator_CalcMD5Hash(t *testing.T) {
 	want := hex.EncodeToString(hash[:])
 
 	ctx := context.Background()
-	got, err := calculator.CalcMD5Hash(ctx, testServer.URL)
+	got, err := calculator.CalcHash(ctx, testServer.URL)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
 }
 
-// TODO: test errors
+func TestCalculator_CalcMD5Hash_Error(t *testing.T) {
+	calculator := Calculator{Client: &http.Client{Timeout: 1 * time.Minute}}
+
+	ctx := context.Background()
+	got, err := calculator.CalcHash(ctx, "invalid/url")
+	require.Error(t, err)
+	assert.Equal(t, "", got)
+}

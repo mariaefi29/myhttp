@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os/signal"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -16,87 +14,23 @@ import (
 
 type args struct {
 	Workers int      `arg:"--parallel" help:"number of parallel workers" default:"10"`
-	Input   []string `arg:"positional"`
+	URLs    []string `arg:"positional"`
 }
 
 func main() {
 	var args args
 	arg.MustParse(&args)
 
-	urlCh := make(chan string)
-	ctx := context.Background()
+	ctx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 
-	var (
-		wg sync.WaitGroup
-		mu sync.Mutex
-	)
-	wg.Add(args.Workers)
-
-	go func() {
-		defer close(urlCh)
-		writeURL(ctx, urlCh, args.Input)
-	}()
-
-	calculator := md5_calculator.Calculator{
-		Client: &http.Client{
-			Timeout: 1 * time.Minute,
-		},
-	}
-	results := make([]result, 0, len(args.Input))
-	for i := 0; i < args.Workers; i++ {
-		go func() {
-			defer wg.Done()
-			res := processURLs(ctx, calculator, urlCh)
-			mu.Lock()
-			results = append(results, res...)
-			mu.Unlock()
-		}()
-	}
-
-	signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
-	wg.Wait()
+	calculator := md5_calculator.Calculator{Client: &http.Client{Timeout: time.Minute}}
+	results := calculator.CalcHashes(ctx, args.Workers, args.URLs)
 
 	for _, result := range results {
 		output := result.MD5Hash
-		if result.err != nil {
-			output = fmt.Errorf("err: %s", result.err).Error()
+		if result.Err != nil {
+			output = fmt.Errorf("err: %s", result.Err).Error()
 		}
-		fmt.Println(result.inputURL, output)
+		fmt.Println(result.InputURL, output)
 	}
-}
-
-func writeURL(ctx context.Context, urlCh chan string, input []string) {
-	for _, url := range input {
-		const prefix = "https://"
-		if !strings.HasPrefix(url, prefix) {
-			url = prefix + url
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case urlCh <- url:
-		}
-	}
-
-	return
-}
-
-type result struct {
-	inputURL string
-	MD5Hash  string
-	err      error
-}
-
-func processURLs(ctx context.Context, calculator md5_calculator.Calculator, urlCh chan string) []result {
-	results := make([]result, 0)
-	for url := range urlCh {
-		hash, err := calculator.CalcMD5Hash(ctx, url)
-		results = append(results, result{
-			inputURL: url,
-			MD5Hash:  hash,
-			err:      err,
-		})
-	}
-
-	return results
 }
